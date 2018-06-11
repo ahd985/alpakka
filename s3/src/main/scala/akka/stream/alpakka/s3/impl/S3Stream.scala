@@ -358,11 +358,12 @@ private[alpakka] final class S3Stream(settings: S3Settings)(implicit system: Act
             uploadPartRequest(uploadInfo, chunkIndex, chunkedPayload.data, chunkedPayload.size, headers)
           (partRequest, (uploadInfo, chunkIndex))
       }
-      .mapAsync(parallelism) { case (req, info) => {
-        // Use a different signing key every time we upload
-        val key: SigningKey = signingKey
-        Signer.signedRequest(req, key).zip(Future.successful(info))
-      } }
+      .mapAsync(parallelism) {
+        case (req, info) =>
+          // Make sure we have the latest signing key for each chunk
+          val key: SigningKey = signingKey
+          Signer.signedRequest(req, key).zip(Future.successful(info))
+      }
   }
 
   private def getChunkBuffer(chunkSize: Int) = settings.bufferType match {
@@ -410,13 +411,12 @@ private[alpakka] final class S3Stream(settings: S3Settings)(implicit system: Act
         .flatMap { responses: Seq[UploadPartResponse] =>
           val successes = responses.collect { case r: SuccessfulUploadPart => r }
           val failures = responses.collect { case r: FailedUploadPart => r }
-          if (responses.isEmpty) {
+          if (responses.isEmpty)
             Future.failed(new RuntimeException("No Responses"))
-          } else if (failures.isEmpty) {
+          else if (failures.isEmpty)
             Future.successful(successes.sortBy(_.index))
-          } else {
+          else
             Future.failed(FailedUpload(failures.map(_.exception)))
-          }
         }
         .flatMap(completeMultipartUpload(s3Location, _))
     }
@@ -464,7 +464,7 @@ private[alpakka] final class S3Stream(settings: S3Settings)(implicit system: Act
   private[impl] def createPartitions(chunkSize: Int,
                                      sourceLocation: S3Location)(objectSize: Long): List[CopyPartition] =
     if (objectSize <= 0 || objectSize < chunkSize) CopyPartition(1, sourceLocation) :: Nil
-    else {
+    else
       ((0L until objectSize by chunkSize).toList :+ objectSize)
         .sliding(2)
         .toList
@@ -472,7 +472,6 @@ private[alpakka] final class S3Stream(settings: S3Settings)(implicit system: Act
         .map {
           case (ls, index) => CopyPartition(index + 1, sourceLocation, Some(ByteRange(ls.head, ls.last)))
         }
-    }
 
   private def createCopyRequests(
       location: S3Location,
